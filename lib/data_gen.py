@@ -9,45 +9,54 @@ def csvsToSubset(csvfiles):
         if not 'csv' in mycsv:
             continue
 
-        df = pd.read_csv(os.path.join(data_dir, mycsv)).astype(float) #.fillna(-1) #.iloc[::10, :]
+        df = pd.read_csv(os.path.join(DATA_DIR, mycsv))#.astype(float) #.fillna(-1) #.iloc[::10, :]
         dfs.append(df)
     # dfs = byHDF(dfs) 
     # dfs = pd.concat(dfs, axis=0).fillna(0)
     return dfs
 
 
-def to_sequence(X_df, y_df, sequence_len):
+def to_sequence(X_df, y, sequence_len):
 
     xs = []
     for i in range( len(X_df)-sequence_len):
         # if i % 10000 == 0:
         #     print(i, len(X_df))
-        xs.append(np.array(X_df.iloc[i:i+sequence_len+1]))
-    y = np.array(y_df.iloc[sequence_len:])
-    return np.array(xs), y.reshape((np.shape(y)[0], len(y_df.columns)))
+        xs.append(np.array(X_df.iloc[i:i+sequence_len]))
+    # y = np.array(y_df.iloc[sequence_len:])
+    y = y[sequence_len:]
+    ret_x = np.array(xs)
+    ret_y = np.ravel(y) # y.reshape((np.shape(y)[0], 1))
+    return ret_x, ret_y 
 
 def dfToXyDf(df):
     x_cols = [x for x in df.columns if 'a_' == x[:2] or 's_' == x[:2]]
     # print("BUTTONS:", [x for x in df.columns if '_buttons_logical' in x])
-    # categoricalFeatures.extend([x for x in df.columns if '_buttons_logical' in x])
+    # CATEGORICAL_FEATURES.extend([x for x in df.columns if '_buttons_logical' in x])
     # print(x_cols)
     X_df = df[x_cols]
-    y_df = df[['pred_player0_state']] #, 'pred_player1_state']]
+    y_df = df[LABELS] 
     return X_df, y_df, x_cols
     
 
-def encode(dfs, sequence_len, ohe):
-    dfs = pd.concat(dfs, axis=0).fillna(0)
-    X_df, y_df, x_cols = dfToXyDf(dfs)
+def encode(df, sequence_len, ohe, le):
+    total = 0
+    # dfs = pd.concat(dfs, axis=0).fillna(0)
+    X_df, y_df, x_cols = dfToXyDf(df)
     # ohe = pickle.load("encoder.pkl", "rb")
-    print(X_df[categoricalFeatures].astype(str))
-    transformedX = ohe.transform(X_df[categoricalFeatures].astype(str))
-    
-    transformed_df = pd.DataFrame(transformedX, columns=ohe.get_feature_names_out())
-    X_df = pd.concat([X_df, transformed_df], axis=1).drop(columns=categoricalFeatures, axis=1)
-
-    X,y = to_sequence(X_df.iloc[:sequence_len*2], y_df.iloc[:sequence_len*2], sequence_len)
-    return np.shape(X), np.shape(y), x_cols
+    # print(X_df[CATEGORICAL_FEATURES].astype(str))
+    transformedX = ohe.transform(X_df[CATEGORICAL_FEATURES].fillna(0).astype(str) )
+    # feature_names_out = ohe.get_feature_names_out()
+    transformed_df = pd.DataFrame.sparse.from_spmatrix(transformedX, columns=ohe.get_feature_names_out())
+    X_df = pd.concat([X_df.reset_index().drop(columns=CATEGORICAL_FEATURES, axis=1), transformed_df.reset_index()], axis=1)
+    y = le.transform(y_df)
+    # X,y = to_sequence(X_df.iloc[:sequence_len*2], y_df.iloc[:sequence_len*2], sequence_len)
+    X,y = to_sequence(X_df.fillna(0), y, sequence_len)
+    # if len(np.shape(X)) == 1:
+    #     print("")
+    # if np.shape(X)[-1] < 2280:
+    #     print("")
+    return X.astype(float), y, X_df.columns
 
 
 
@@ -63,13 +72,17 @@ class DataGenerator(keras.utils.Sequence):
                  batch_size,
                  shuffle=True,
                  csvfiles=[],
-                 ohe=None):
+                 ohe=None,
+                 le = None,
+                 sequence_len=3):
         self.X_col = X_col
         self.y_col = y_col
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.csvfiles = csvfiles
         self.ohe = ohe
+        self.le = le
+        self.sequence_len = sequence_len
         # self.pca = pca
         # self.scaler = scaler
         
@@ -79,22 +92,38 @@ class DataGenerator(keras.utils.Sequence):
 
     def __getitem__(self, index):
         'Generate one batch of data'
-        df = pd.read_csv(os.path.join('meleeEvalBar', self.csvfiles[index]))
-        df = df[df.next_death != -1].dropna()
-        if len(df) < 4:
-            return
-            
-        dfEven = df.iloc[::2]
-        dfOdd = df.iloc[1::2].add_suffix('_odd')
-        df = pd.concat([dfEven.reset_index(drop=True), 
-                        dfOdd[['player/1/x_odd', 'player/1/y_odd', 'player/2/x_odd', 'player/2/y_odd']].reset_index(drop=True)],
-                      axis=1)
-#         print(np.shape(df), self.csvfiles[index])
-        df = df.dropna().sample(self.batch_size, replace=True)
-        X, y = ohe_transform(df, self.ohe)
-#         X = self.scaler.transform(X)
-#         X = self.pca.transform(X)
+        # print(self.csvfiles[index])
+        df = pd.read_csv(os.path.join(DATA_DIR, self.csvfiles[index]))
+        rand_index = random.randint(0, len(df)-self.batch_size)
+        df = df.iloc[rand_index:rand_index+self.batch_size+self.sequence_len]
+        
+        X, y, _ = encode(df, self.sequence_len, self.ohe, self.le)
+        # if 0 in list(np.shape(X)) or 0 in list(np.shape(y)):
+        #     print("WHY")
+        # print("Shape:", list(np.shape(X)), list(np.shape(y)))
+        if np.shape(X)[-1]<625 or 0 in list(np.shape(X)) or 0 in list(np.shape(y)):
+            print("BAD FILE:", self.csvfiles[index])
+            return self.X, self.y
+        self.X = X
+        self.y = y
         return X, y
 
-    def on_epoch_end(self):
-        random.shuffle(self.csvfiles)
+    # def on_epoch_end(self):
+    #     random.shuffle(self.csvfiles)
+
+def get_batch(batch_size, sequence_len, csvfile, ohe, le):
+    df = pd.read_csv(os.path.join(DATA_DIR, csvfile))
+    
+    
+    if batch_size > 0:
+        rand_index = random.randint(0, len(df)-batch_size)
+        df = df.iloc[rand_index:rand_index+batch_size+sequence_len]        
+    
+    X, y, _ = encode(df, sequence_len, ohe, le)
+    # if 0 in list(np.shape(X)) or 0 in list(np.shape(y)):
+    #     print("WHY")
+    # print("Shape:", list(np.shape(X)), list(np.shape(y)))
+    # if np.shape(X)[-1]<625 or 0 in list(np.shape(X)) or 0 in list(np.shape(y)):
+        # print("BAD FILE:", self.csvfiles[index])
+
+    return X, y

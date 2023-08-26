@@ -1,126 +1,226 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import os
+from tempfile import gettempdir
+
 import tensorflow as tf
-# print(tf.config.list_physical_devices('GPU'))
 
-import nvidia.cudnn
-# print(nvidia.cudnn.__file__)
-
-from tensorflow.python.client import device_lib
-# print(device_lib.list_local_devices())
-
-
-from tensorflow.python.client import device_lib
-
-# def get_available_gpus():
-
-# print(device_lib.list_local_devices())
-
-
-
-import json
-import os
-import sys
-from slippi import Game
-import random
-
-# for i in range(1000, 2000):
-# work/training_data_csv/(...) Fox vs Fox [BF] Game_20200122T221201.csv
-# files = os.listdir('training_data')
-# random.shuffle(files)
-# for filename in files:
-#     game = Game(os.path.join('training_data', filename))
-    
-
-#     for i in range(1000):
-#         for p in game.frames[1111].ports:
-#             if p is None:
-#                 continue
-#             print(str(p.leader.pre.buttons.physical).split('.')[1].split('|'))
-#             # p1 = game.frames[1111].ports[2].leader.pre
-#         # print(dir(p0.buttons.logical))
-#         # print(p1)
-#         break
-#     break
-
-
-from lib.slp_to_csv import processFile
-import multiprocess
-import os
-from lib.vars import *
-# multiprocess.set_start_method('fork')
-
-# print("Number of cpu : ", multiprocess.cpu_count())
-
-
-myindex = 0
-unprocessedFiles = []
-for filename in os.listdir(slp_dir):
-    if not 'slp' in filename:
-        continue
-    if filename.count("Fox") < 2:
-        continue
-    unprocessedFiles.append(filename)
-    # if myindex > 25:
-    #     break
-    myindex += 1
-
-
-from multiprocess import Pool
-import tqdm
-    
-# pool = Pool(processes=12)
-# for _ in tqdm.tqdm(pool.imap_unordered(processFile, unprocessedFiles), total=len(unprocessedFiles)):
-#     pass
-
-
-from tensorflow import keras
 from tensorflow.keras import layers
-import tensorflow as tf
+from tensorflow.keras import Model
 
-# tf.config.threading.set_inter_op_parallelism_threads(64) 
-# tf.config.threading.set_intra_op_parallelism_threads(64)
-# tf.config.set_soft_device_placement(True)
-# tf.device('/cpu:0')
-
-
-
-import pandas as pd
+from clearml import Task
 import pickle
-import random
+import numpy as np
+import tqdm
+
 from lib.data_gen import csvsToSubset
+from lib.vars import LABELS, DATA_DIR
+from lib.data_gen import get_batch
 
-csvfiles = []
-i = 0
-for filename in os.listdir(data_dir):
-    # if not 'csv' in filename:
-    #     continue
-    csvfiles.append(filename)
-    i +=1
-    if i%10 ==0:
-        print(i)
-        break
-    # if i > 1:
-    #     break
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  
+
+
+# Connecting ClearML with the current process,
+# from here on everything is logged automatically
+task = Task.init(project_name='Melee Engine', task_name='My Task')
+
+
+# Build the tf.keras model using the Keras model subclassing API
+class MyModel(Model):
+    def __init__(self, head_size, num_heads, ff_dim, mlp_units, dropout, mlp_dropout , input_shape, output_shape):
+        super(MyModel, self).__init__()
+        self.head_size = head_size
+        self.num_heads = num_heads
+        self.ff_dim = ff_dim
+        self.mlp_units = mlp_units
+        self.dropout = dropout
+        self.mlp_dropout = mlp_dropout
+
+        self.ln0 = layers.LayerNormalization(epsilon=1e-6)
+
+        self.te_ln0 = [layers.LayerNormalization(epsilon=1e-6) for _ in range(num_heads)]
+        self.te_multi_head = [layers.MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout) for _ in range(num_heads)]
+        self.te_dropout0 = [layers.Dropout(self.dropout) for _ in range(num_heads)]
+
+        self.te_ln1 = [layers.LayerNormalization(epsilon=1e-6) for _ in range(num_heads)]
+        self.te_conv0 = [layers.Conv1D(filters=self.ff_dim, kernel_size=1, activation="relu") for _ in range(num_heads)]
+        self.te_dropout1 = [layers.Dropout(self.dropout) for _ in range(num_heads)]
+        self.te_conv1 = [layers.Conv1D(filters=input_shape[-1], kernel_size=1) for _ in range(num_heads)]
+
+        self.pool = layers.GlobalAveragePooling1D(data_format="channels_first") # for _ in range(num_heads)]
         
-# random.shuffle(csvfiles)
+        self.mlp_dense = []
+        self.mlp_drop = []
+        for dim in mlp_units:
+            self.mlp_dense.append(layers.Dense(dim, activation="relu"))
+            self.mlp_drop.append(layers.Dropout(self.mlp_dropout))
 
-# ohe = None
-# if os.path.exists('encoder'):
-with open('encoder.pkl', 'rb') as f:
+        self.out_dense = layers.Dense(output_shape[-1], activation="softmax")
+
+    def call_transformer_encoder(self, inputs, i):
+        # Attention and Normalization 
+        x = self.te_ln0[i](inputs)
+        x = self.te_multi_head[i](x, x)
+        x = self.te_dropout0[i](x)
+    #     x = layers.LayerNormalization(epsilon=1e-6)(x)
+        res = x + inputs
+
+        # Feed Forward Part
+        x = self.te_ln1[i](res)
+        x = self.te_conv0[i](x)
+        x = self.te_dropout1[i](x)
+        x = self.te_conv1[i](x)
+        
+        return x + res
+
+    def call(self, x):
+        x = self.ln0(x)
+        for i in range(self.num_heads):
+            x = self.call_transformer_encoder(x, i)
+        # outs = []
+        # for y in ys:
+        x = self.pool(x)
+        for i in range(len(self.mlp_units)):
+            x = self.mlp_dense[i](x)
+            x = self.mlp_drop[i](x)
+        # outputs = layers.Dense(y_len, activation="sigmoid")(x)
+        # outputs = layers.Dense(2, activation="linear")(x)
+        # outputs = layers.Dense(370, activation="softmax")(x)
+        # outs.append(outputs)
+        #            layers.Dense(np.shape(ys[1])[1], activation="softmax")(layers.Dense(30, activation="relu")(x))]
+        return self.out_dense(x)
+
+
+def get_csv_files(n=-1):
+
+    csvfiles = []
+    i = 0
+    for filename in os.listdir(DATA_DIR):
+        if not 'csv' in filename:
+            continue
+        csvfiles.append(filename)
+        i +=1
+        # if i%10 ==0:
+        #     print(i)
+        if i >= n and n != -1:
+            break
+        # if i > 1:
+        #     break
+    return csvfiles
+            
+csvfiles = get_csv_files(1)
+
+with open('one_hot_encoder.pkl', 'rb') as f:
     ohe = pickle.load(f)
 
-print(len(ohe.get_feature_names_out()))
+with open('label_encoder.pkl', 'rb') as f:
+    le = pickle.load(f)
 
-
-dfs = csvsToSubset(csvfiles[:1])
-
-
-# print(list(dfs[0].columns))
-# print(len(ohe.get_feature_names_out()))
-
+dfs = csvsToSubset(csvfiles)
 
 from lib.data_gen import encode
 
 
-sequence_len = 3
-print(len(list(ohe.get_feature_names_out())))
-Xshape, yshape, x_cols = encode(dfs, sequence_len, ohe)
+sequence_len = 60
+X, y, x_cols = encode(dfs[0].iloc[:sequence_len*5], sequence_len, ohe, le)
+
+# Create an instance of the model
+model = MyModel(head_size=256, 
+                num_heads=1, 
+                ff_dim=4, 
+                mlp_units=[128], 
+                dropout=.2, 
+                mlp_dropout=.2,
+                input_shape=(X.shape[1], X.shape[2]), 
+                output_shape=[len(le.classes_)])
+
+# Choose an optimizer and loss function for training
+loss_object = tf.keras.losses.SparseCategoricalCrossentropy()
+optimizer = tf.keras.optimizers.Adam()
+
+# Select metrics to measure the loss and the accuracy of the model.
+# These metrics accumulate the values over epochs and then print the overall result.
+train_loss = tf.keras.metrics.Mean(name='train_loss', dtype=tf.float32)
+train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+
+test_loss = tf.keras.metrics.Mean(name='test_loss', dtype=tf.float32)
+test_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
+
+
+# Use tf.GradientTape to train the model
+@tf.function
+def train_step(features, labels):
+    with tf.GradientTape() as tape:
+        predictions = model(features)
+        loss = loss_object(labels, predictions)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+    train_loss(loss)
+    train_accuracy(labels, predictions)
+
+
+# Test the model
+@tf.function
+def test_step(images, labels):
+    predictions = model(images)
+    t_loss = loss_object(labels, predictions)
+
+    test_loss(t_loss)
+    test_accuracy(labels, predictions)
+
+
+# Set up summary writers to write the summaries to disk in a different logs directory
+train_log_dir = os.path.join(gettempdir(), 'logs', 'gradient_tape', 'train')
+test_log_dir = os.path.join(gettempdir(), 'logs', 'gradient_tape', 'test')
+train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+test_summary_writer = tf.summary.create_file_writer(test_log_dir)
+
+# Set up checkpoints manager
+ckpt = tf.train.Checkpoint(step=tf.Variable(1), optimizer=optimizer, net=model)
+manager = tf.train.CheckpointManager(ckpt, os.path.join(gettempdir(), 'tf_ckpts'), max_to_keep=3)
+ckpt.restore(manager.latest_checkpoint)
+if manager.latest_checkpoint:
+    print("Restored from {}".format(manager.latest_checkpoint))
+else:
+    print("Initializing from scratch.")
+
+# Start training
+EPOCHS = 50
+BATCH_SIZE = 64
+SEQUENCE_LEN = 60
+for epoch in range(EPOCHS):
+    for csv_file in tqdm.tqdm(get_csv_files()):
+    # for features, labels in get_batch(batch_size, sequence_len, csvfile, ohe, le):
+        features, labels = get_batch(BATCH_SIZE, SEQUENCE_LEN, csv_file, ohe, le)
+        if 0 in np.shape(features) or 0 in np.shape(labels) or np.shape(features)[-1]<625:
+            continue
+        train_step(features, labels)
+        with train_summary_writer.as_default():
+            tf.summary.scalar('loss', train_loss.result(), step=epoch)
+            tf.summary.scalar('accuracy', train_accuracy.result(), step=epoch)
+
+    ckpt.step.assign_add(1)
+    if int(ckpt.step) % 1 == 0:
+        save_path = manager.save()
+        print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
+
+    # for test_images, test_labels in test_ds:
+    #     test_step(test_images, test_labels)
+    #     with test_summary_writer.as_default():
+    #         tf.summary.scalar('loss', test_loss.result(), step=epoch)
+    #         tf.summary.scalar('accuracy', test_accuracy.result(), step=epoch)
+
+    template = 'Epoch {}, Loss: {}, Accuracy: {}' #, Test Loss: {}, Test Accuracy: {}'
+    print(template.format(epoch+1,
+                          train_loss.result(),
+                          train_accuracy.result()*100))
+                        #   test_loss.result(),
+                        #   test_accuracy.result()*100))
+
+    # Reset the metrics for the next epoch
+    train_loss.reset_states()
+    train_accuracy.reset_states()
+    # test_loss.reset_states()
+    # test_accuracy.reset_states()

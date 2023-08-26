@@ -4,11 +4,20 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
-            "name": "Python: Current File",
+            "name": "slp to csv",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceRoot}/train.py",
+            "program": "${workspaceRoot}/slp_to_csv.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Train",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceRoot}/train_clearml.py",
             "console": "integratedTerminal",
             "justMyCode": true
         }
