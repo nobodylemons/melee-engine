@@ -16,8 +16,6 @@ import tqdm
 from lib.data_gen import csvsToSubset
 from lib.vars import LABELS, DATA_DIR
 from lib.data_gen import get_batch
-from lib.time2vec import Time2Vec
-from lib.positional_embedding import PositionalEmbedding
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  
@@ -40,11 +38,6 @@ class MyModel(Model):
         self.mlp_dropout = mlp_dropout
 
         self.ln0 = layers.LayerNormalization(epsilon=1e-6)
-
-        # self.ttv = Time2Vec(kernel=625)
-        
-
-        self.ln1 = layers.LayerNormalization(epsilon=1e-6)
 
         self.te_ln0 = [layers.LayerNormalization(epsilon=1e-6) for _ in range(num_heads)]
         self.te_multi_head = [layers.MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout) for _ in range(num_heads)]
@@ -82,25 +75,7 @@ class MyModel(Model):
         return x + res
 
     def call(self, x):
-        # x = self.ln0(x)
-        
-        # output_list = []
-
-        # for col in range(x.shape[-1]):
-        #     print("X SHAPE:", x.shape)
-        #     print("SHAPE:",col,x[:,:,col].shape)
-        #     result = self.ttv(x[:,:,col])
-        #     print("result shape:", result.shape)
-        #     output_list.append(result)
-        #     # x[:,:,col] = result
-        # x = tf.stack(output_list)
-        # print("NEW X SHAPE", x.shape)
-
-        x = self.ttv(x)
-        # x = tf.map_fn(self.ttv, x, back_prop=False)
-        # np.apply_along_axis(self.ttv, axis=2, arr=x)
-        # x = self.ttv(x)
-        x = self.ln1(x)
+        x = self.ln0(x)
         for i in range(self.num_heads):
             x = self.call_transformer_encoder(x, i)
         # outs = []
@@ -147,11 +122,8 @@ dfs = csvsToSubset(csvfiles)
 from lib.data_gen import encode
 
 
-EPOCHS = 50
-BATCH_SIZE = 128
-SEQUENCE_LEN = 60
-
-X, y, x_cols = encode(dfs[0].iloc[:SEQUENCE_LEN*5], SEQUENCE_LEN, ohe, le)
+sequence_len = 60
+X, y, x_cols = encode(dfs[0].iloc[:sequence_len*5], sequence_len, ohe, le)
 
 # Create an instance of the model
 model = MyModel(head_size=256, 
@@ -160,7 +132,7 @@ model = MyModel(head_size=256,
                 mlp_units=[128], 
                 dropout=.2, 
                 mlp_dropout=.2,
-                input_shape=X.shape, 
+                input_shape=(X.shape[1], X.shape[2]), 
                 output_shape=[len(le.classes_)])
 
 # Choose an optimizer and loss function for training
@@ -215,7 +187,9 @@ else:
     print("Initializing from scratch.")
 
 # Start training
-
+EPOCHS = 50
+BATCH_SIZE = 64
+SEQUENCE_LEN = 60
 for epoch in range(EPOCHS):
     for csv_file in tqdm.tqdm(get_csv_files()):
     # for features, labels in get_batch(batch_size, sequence_len, csvfile, ohe, le):
