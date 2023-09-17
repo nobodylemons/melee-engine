@@ -17,7 +17,15 @@
             "name": "Train",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceRoot}/train_clearml.py",
+            "program": "${workspaceRoot}/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "time2vec",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceRoot}/lib/time2vec.py",
             "console": "integratedTerminal",
             "justMyCode": true
         }

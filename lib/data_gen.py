@@ -51,7 +51,8 @@ def encode(df, sequence_len, ohe, le):
     X_df = pd.concat([X_df.reset_index().drop(columns=CATEGORICAL_FEATURES, axis=1), transformed_df.reset_index()], axis=1)
     y = le.transform(y_df)
     # X,y = to_sequence(X_df.iloc[:sequence_len*2], y_df.iloc[:sequence_len*2], sequence_len)
-    X,y = to_sequence(X_df.fillna(0), y, sequence_len)
+    # X,y = to_sequence(X_df.fillna(0), y, sequence_len)
+    X = X_df.values
     # if len(np.shape(X)) == 1:
     #     print("")
     # if np.shape(X)[-1] < 2280:
@@ -117,7 +118,7 @@ def get_batch(batch_size, sequence_len, csvfile, ohe, le):
     
     if batch_size > 0:
         rand_index = random.randint(0, len(df)-batch_size)
-        df = df.iloc[rand_index:rand_index+batch_size+sequence_len]        
+        df = df.iloc[rand_index:rand_index+batch_size]        
     
     X, y, _ = encode(df, sequence_len, ohe, le)
     # if 0 in list(np.shape(X)) or 0 in list(np.shape(y)):
