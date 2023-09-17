@@ -17,7 +17,7 @@
             "name": "Train",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceRoot}/train_clearml.py",
+            "program": "${workspaceRoot}/train.py",
             "console": "integratedTerminal",
             "justMyCode": true
         }
