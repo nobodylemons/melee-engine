@@ -33,10 +33,10 @@ dfs = pd.concat(dfs, axis=0).fillna(0)
 ohe = OneHotEncoder()
 ohe.fit(dfs[CATEGORICAL_FEATURES].astype(str))
 with open("one_hot_encoder.pkl", "wb") as f: 
-    pickle.dump(ohe, f)
+    pickle.dump({"encoder":ohe, "features": CATEGORICAL_FEATURES}, f)
 
 le = LabelEncoder()
 le.fit(dfs[LABELS[0]].astype(str))
 
 with open("label_encoder.pkl", "wb") as f: 
-    pickle.dump(le, f)
+    pickle.dump({"encoder":le, "labels": LABELS} , f)

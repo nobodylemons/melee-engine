@@ -14,7 +14,7 @@ import numpy as np
 import tqdm
 
 from lib.data_gen import csvsToSubset
-from lib.vars import LABELS, DATA_DIR
+from lib.vars import DATA_DIR
 from lib.data_gen import get_batch
 
 import os
@@ -112,10 +112,11 @@ def get_csv_files(n=-1):
 csvfiles = get_csv_files(1)
 
 with open('one_hot_encoder.pkl', 'rb') as f:
-    ohe = pickle.load(f)
+    ohe = pickle.load(f)["encoder"]
+    
 
 with open('label_encoder.pkl', 'rb') as f:
-    le = pickle.load(f)
+    le = pickle.load(f)["encoder"]
 
 dfs = csvsToSubset(csvfiles)
 
