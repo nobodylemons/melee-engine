@@ -1,5 +1,5 @@
 SLP_DIR = '/home/robert/slippi_data/Slippi_Public_Dataset_v3'
-DATA_DIR = '/home/robert/slippi_data/training_data_csv'
+DATA_DIR = '/root/training_data_csv'
 
 
 CATEGORICAL_FEATURES = ['s_stage', 

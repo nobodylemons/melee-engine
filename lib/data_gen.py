@@ -56,6 +56,7 @@ def encode(df, sequence_len, ohe, le):
     #     print("")
     # if np.shape(X)[-1] < 2280:
     #     print("")
+    X[X=='None'] = '0' # This could cause problems later but I don't want to think about it
     return X.astype(float), y, X_df.columns
 
 
