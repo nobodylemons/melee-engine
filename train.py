@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras import Model
 
-from clearml import Task
+# from clearml import Task
 import pickle
 import numpy as np
 import tqdm
@@ -25,7 +25,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 # Connecting ClearML with the current process,
 # from here on everything is logged automatically
-task = Task.init(project_name='Melee Engine', task_name='My Task')
+# task = Task.init(project_name='Melee Engine', task_name='My Task')
 
 
 # Build the tf.keras model using the Keras model subclassing API
