@@ -5,7 +5,10 @@ import pandas as pd
 import json
 from slippi import Game, id
 import os
-from lib.vars import *
+from lib.vars import DATA_DIR, SLP_DIR
+from pathlib import Path
+
+Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
 
 def myfloat(n):
     if n is None:
@@ -108,15 +111,23 @@ def processFile(filename):
         
     df = pd.DataFrame(data).fillna(0)
     df.to_csv(csvPath,index=False, header=True)
+    dtype_filename = os.path.join(DATA_DIR, 'dtype_file.csv')
+    if os.path.exists(dtype_filename):
+        return
+    dtype_df = df.dtypes
+    dtype_df.to_csv(dtype_filename)
     
 
 if __name__ == "__main__":
+    dtype_filename = os.path.join(DATA_DIR, 'dtype_file.csv')
+    if os.path.exists(dtype_filename):
+        os.remove(dtype_filename)
     unprocessedFiles = []
     for filename in os.listdir(SLP_DIR):
         if not 'slp' in filename:
             continue
-        if filename.count("Fox") < 2:
-            continue
+        # if filename.count("Fox") < 2:
+        #     continue
         # if "14_24_55" not in filename:
         #     continue
         unprocessedFiles.append(filename)
@@ -126,5 +137,6 @@ if __name__ == "__main__":
     # processFile(unprocessedFiles[0])
     # print(unprocessedFiles)
     pool = Pool(processes=12)
+
     for _ in tqdm.tqdm(pool.imap_unordered(processFile, unprocessedFiles), total=len(unprocessedFiles)):
         pass

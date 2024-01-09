@@ -2,6 +2,7 @@ import os
 from lib.vars import *
 from sklearn.preprocessing import OneHotEncoder
 import pickle
+from pandas import SparseDtype
 
 def csvsToSubset(csvfiles):
     dfs = []
@@ -22,7 +23,7 @@ def to_sequence(X_df, y, sequence_len):
     for i in range( len(X_df)-sequence_len):
         # if i % 10000 == 0:
         #     print(i, len(X_df))
-        xs.append(np.array(X_df.iloc[i:i+sequence_len]))
+        xs.append(X_df.iloc[i:i+sequence_len].astype(SparseDtype(float)))
     # y = np.array(y_df.iloc[sequence_len:])
     y = y[sequence_len:]
     ret_x = np.array(xs)
@@ -40,18 +41,21 @@ def dfToXyDf(df):
     
 
 def encode(df, sequence_len, ohe, le):
-    total = 0
     # dfs = pd.concat(dfs, axis=0).fillna(0)
-    X_df, y_df, x_cols = dfToXyDf(df)
+    divisor = int(len(df)/sequence_len)*sequence_len
+    X_df, y_df, x_cols = dfToXyDf(df.iloc[:divisor])
     # ohe = pickle.load("encoder.pkl", "rb")
     # print(X_df[CATEGORICAL_FEATURES].astype(str))
     transformedX = ohe.transform(X_df[CATEGORICAL_FEATURES].fillna(0).astype(str) )
     # feature_names_out = ohe.get_feature_names_out()
     transformed_df = pd.DataFrame.sparse.from_spmatrix(transformedX, columns=ohe.get_feature_names_out())
     X_df = pd.concat([X_df.reset_index().drop(columns=CATEGORICAL_FEATURES, axis=1), transformed_df.reset_index()], axis=1)
-    y = le.transform(y_df)
+    y = le.transform(y_df.values.ravel())
     # X,y = to_sequence(X_df.iloc[:sequence_len*2], y_df.iloc[:sequence_len*2], sequence_len)
     X,y = to_sequence(X_df.fillna(0), y, sequence_len)
+    #240, 60, 625
+    X = X_df.values.reshape((int(divisor/sequence_len), sequence_len, 625))
+    y = y.reshape((int(divisor/sequence_len), sequence_len))
     # if len(np.shape(X)) == 1:
     #     print("")
     # if np.shape(X)[-1] < 2280:
